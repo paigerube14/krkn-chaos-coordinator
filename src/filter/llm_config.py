@@ -14,6 +14,8 @@ Environment variables:
   GOOGLE_API_KEY=...
 """
 
+from __future__ import annotations
+
 import logging
 import os
 from dataclasses import dataclass

@@ -1,5 +1,7 @@
 """Domain models for krkn-chaos-coordinator."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import Enum
 

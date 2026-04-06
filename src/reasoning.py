@@ -4,6 +4,8 @@ ChromaDB retrieves candidate docs/scenarios → LLM reasons over those results.
 Same RAG pattern as the FILTER phase.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 

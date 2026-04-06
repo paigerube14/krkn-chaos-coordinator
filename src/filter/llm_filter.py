@@ -4,6 +4,8 @@ Supports: Ollama (local), Anthropic (Claude API), OpenAI, Google Gemini.
 Auto-detects the best available backend from environment variables.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 

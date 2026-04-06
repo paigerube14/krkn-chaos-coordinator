@@ -6,6 +6,8 @@ upgrade, scaling) — it's chaos-relevant. Even if the symptom appears in a
 different component than the root cause.
 """
 
+from __future__ import annotations
+
 import logging
 
 from src.models import Bug, FilterResult

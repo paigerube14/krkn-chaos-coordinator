@@ -164,3 +164,201 @@ def _fallback_match(bug: Bug, scenario_hits: list[dict]) -> ScenarioMatch:
         )
 
     return ScenarioMatch(bug=bug, match_result=MatchResult.NO_MATCH)
+
+
+ANALYZE_SYSTEM_PROMPT = """You are a chaos engineering expert for OpenShift/Kubernetes using the krkn chaos testing framework.
+
+You are given:
+1. A JIRA bug with its failure mode
+2. The closest existing krkn scenario (if any — partial match or no match)
+3. Relevant OCP architecture documentation
+4. Available krkn plugins and their capabilities
+5. Previously resolved similar bugs (from Neo4j history)
+
+Your job: analyze the gap and produce a SPECIFIC recommendation for how to fill it.
+
+Scoring guide (0-100):
+- Can you explain exact reproduction steps? (+20)
+- Is there an existing scenario to extend? (+25)
+- Do you understand HOW the component fails from the docs? (+20)
+- Is there a krkn plugin that injects this exact failure? (+15)
+- Does this match the agent's domain? (+10)
+- Have we solved a similar bug before? (+10)
+
+For modifications, be SPECIFIC:
+- BAD: "extend the etcd scenario"
+- GOOD: "Add a test case to scenarios/openshift/etcd.yml that deploys CPU hog pods on master nodes (use hog_scenarios plugin with cpu target 80%, duration 300s). While hog is running, check etcd operator status with: oc get co/etcd -o jsonpath='{.status.conditions}'. Assert: etcd should NOT report Degraded=True while members are actually healthy."
+
+Respond with ONLY a JSON object:
+{
+  "confidence_score": 0-100,
+  "reasoning": "Detailed explanation of the score breakdown and analysis",
+  "modifications": ["specific step 1", "specific step 2", ...],
+  "krkn_plugin": "exact plugin name" or null,
+  "repos_to_update": ["krkn", "krkn-hub", "website"]
+}"""
+
+
+def llm_analyze_gap(
+    bug: Bug,
+    match: ScenarioMatch,
+    ocp_docs: list[dict],
+    krkn_docs: list[dict],
+    neo4j_history: list[dict],
+    config: LLMBackendConfig | None = None,
+) -> GapAnalysis:
+    """Use LLM to analyze a coverage gap and produce specific recommendations.
+
+    Args:
+        bug: The JIRA bug.
+        match: ScenarioMatch from MAP phase (PARTIAL or NO_MATCH).
+        ocp_docs: ChromaDB OCP doc search results for component context.
+        krkn_docs: ChromaDB krkn doc search results for available plugins.
+        neo4j_history: Similar resolved bugs from Neo4j.
+        config: LLM backend config. Auto-detected if None.
+
+    Returns:
+        GapAnalysis with LLM-generated confidence score, reasoning, and modifications.
+    """
+    if config is None:
+        config = detect_llm_backend()
+
+    ocp_context = "\n---\n".join(
+        hit["text"][:400] for hit in ocp_docs[:3]
+    ) or "No OCP documentation found."
+
+    krkn_context = "\n---\n".join(
+        hit["text"][:400] for hit in krkn_docs[:3]
+    ) or "No krkn plugin documentation found."
+
+    history_context = "\n".join(
+        f"- {h.get('bug_key', '?')}: {h.get('summary', '?')[:60]} → {h.get('issue_url', 'N/A')}"
+        for h in neo4j_history[:5]
+    ) or "No similar resolved bugs found."
+
+    scenario_context = f"Closest scenario: {match.matched_scenario}" if match.matched_scenario else "No matching scenario found."
+
+    prompt = f"""Bug: {bug.key}
+Component: {bug.component}
+Summary: {bug.summary}
+Description: {bug.description[:1000] if bug.description else 'No description'}
+
+Match result: {match.match_result.value}
+{scenario_context}
+
+OCP Architecture Documentation:
+{ocp_context}
+
+Available krkn Plugins:
+{krkn_context}
+
+Previously Resolved Similar Bugs:
+{history_context}
+
+Analyze this gap. Score confidence and provide SPECIFIC modifications."""
+
+    try:
+        text = call_llm(
+            messages=[
+                {"role": "system", "content": ANALYZE_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            config=config,
+        )
+
+        if "```" in text:
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+            text = text.strip()
+
+        result = json.loads(text)
+
+        score = min(100, max(0, int(result.get("confidence_score", 0))))
+
+        reasoning_parts = []
+        if result.get("reasoning"):
+            reasoning_parts.append(result["reasoning"])
+        if result.get("krkn_plugin"):
+            reasoning_parts.append(f"krkn plugin: {result['krkn_plugin']}")
+        if result.get("repos_to_update"):
+            reasoning_parts.append(f"Repos: {', '.join(result['repos_to_update'])}")
+        reasoning = "; ".join(reasoning_parts)
+
+        modifications = result.get("modifications", [])
+        if not isinstance(modifications, list):
+            modifications = [str(modifications)]
+
+        if score >= 70:
+            confidence = Confidence.HIGH
+            action = ActionType.DRAFT_PR
+        elif score >= 40:
+            confidence = Confidence.MEDIUM
+            action = ActionType.GITHUB_ISSUE
+        else:
+            confidence = Confidence.LOW
+            action = ActionType.GITHUB_ISSUE
+
+        return GapAnalysis(
+            bug=bug,
+            confidence_score=score,
+            confidence_level=confidence,
+            action_type=action,
+            reasoning=reasoning,
+            base_scenario=match.matched_scenario,
+            modifications=modifications,
+        )
+
+    except (json.JSONDecodeError, KeyError) as e:
+        logger.warning("LLM ANALYZE failed for %s (bad response), falling back: %s", bug.key, e)
+        return _fallback_analyze(bug, match)
+    except Exception as e:
+        logger.warning("LLM ANALYZE failed for %s, falling back: %s", bug.key, e)
+        return _fallback_analyze(bug, match)
+
+
+def _fallback_analyze(bug: Bug, match: ScenarioMatch) -> GapAnalysis:
+    """Keyword-based fallback when LLM is unavailable."""
+    score = 0
+    reasoning_parts = []
+
+    if bug.description and len(bug.description) > 200:
+        score += 20
+        reasoning_parts.append("Clear repro steps (+20)")
+
+    if match.match_result == MatchResult.PARTIAL_MATCH:
+        score += 25
+        reasoning_parts.append(f"Partial match: {match.matched_scenario} (+25)")
+
+    failure_keywords = [
+        "timeout", "crash", "unavailable", "degraded", "unhealthy",
+        "not cleared", "failure", "failed", "outage", "disruption",
+        "quorum", "leader election", "not ready", "eviction",
+    ]
+    if any(kw in bug.summary.lower() for kw in failure_keywords):
+        score += 20
+        reasoning_parts.append("Known failure mode (+20)")
+
+    if score >= 70:
+        confidence = Confidence.HIGH
+        action = ActionType.DRAFT_PR
+    elif score >= 40:
+        confidence = Confidence.MEDIUM
+        action = ActionType.GITHUB_ISSUE
+    else:
+        confidence = Confidence.LOW
+        action = ActionType.GITHUB_ISSUE
+
+    modifications = []
+    if match.matched_scenario:
+        modifications.append(f"Extend {match.matched_scenario}")
+
+    return GapAnalysis(
+        bug=bug,
+        confidence_score=score,
+        confidence_level=confidence,
+        action_type=action,
+        reasoning="; ".join(reasoning_parts),
+        base_scenario=match.matched_scenario,
+        modifications=modifications,
+    )

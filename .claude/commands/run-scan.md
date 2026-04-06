@@ -1,15 +1,39 @@
 ---
-description: Run krkn-chaos-coordinator full scan with Claude Code as the reasoning engine
+description: Run krkn-chaos-coordinator scan — optionally pass a question or filter (e.g. "/run-scan what etcd coverage do we have?")
 allowed-tools: Bash, Read, Write, mcp__jira__searchJiraIssuesUsingJql, mcp__github__create_issue
 ---
 
-# krkn-chaos-coordinator — Full Scan
+# krkn-chaos-coordinator — Scan
 
 You are the AI reasoning engine for krkn-chaos-coordinator. You use ChromaDB (4,089 chunks of krkn + OCP docs) and Neo4j (operational memory) to make intelligent chaos testing decisions.
 
+## User Query
+
+```
+$ARGUMENTS
+```
+
+## Mode Selection
+
+If the user query above is empty or blank, run the **Full Scan** (all steps below).
+
+If the user query is NOT empty, run in **Targeted Query** mode:
+- Parse what the user is asking about (component, bug, scenario, coverage area)
+- Skip to the relevant steps below — you don't need to pull all 50 bugs if they only care about etcd
+- Use ChromaDB, Neo4j, and JIRA as needed to answer their specific question
+- Still be thorough: search scenarios, check docs, reason about gaps
+
+**Example targeted queries and how to handle them:**
+- "what etcd bugs and coverage do we have" → Search JIRA for etcd component bugs + search ChromaDB for etcd scenarios + report gaps
+- "does krkn cover OVN pod failures" → Search scenarios for OVN, read the YAML files, report what's covered vs missing
+- "analyze OCPBUGS-12345" → Pull that specific bug, run FILTER/MAP/ANALYZE on just that bug
+- "what gaps exist for networking" → Query Neo4j for networking gap counts + search ChromaDB for networking scenarios
+- "show me all hog scenarios" → Search ChromaDB/krkn docs for hog scenario plugins and list them
+- "what components have the most open gaps" → Query Neo4j gap counts
+
 ## Step 1: DISCOVER
 
-Pull recent bugs from JIRA:
+Pull recent bugs from JIRA (skip or narrow if in Targeted Query mode):
 
 ```
 mcp__jira__searchJiraIssuesUsingJql with:

@@ -44,7 +44,7 @@ def main():
         help=f"Run a single agent ({', '.join(AGENT_CLASSES.keys())}). Default: all.",
     )
     parser.add_argument(
-        "--max-bugs", type=int, default=50, help="Max bugs per agent from JIRA (default: 50)"
+        "--max-bugs", type=int, default=200, help="Max bugs per agent from JIRA (default: 200)"
     )
     parser.add_argument(
         "--days", type=int, default=14, help="Look back N days for bugs (default: 14)"

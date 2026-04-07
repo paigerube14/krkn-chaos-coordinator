@@ -54,7 +54,7 @@ class JiraClient:
         self,
         components: list[str],
         days: int = 14,
-        max_results: int = 50,
+        max_results: int = 200,
         priority_filter: bool = True,
     ) -> list[Bug]:
         """Query OCPBUGS for recent bugs in the given components.

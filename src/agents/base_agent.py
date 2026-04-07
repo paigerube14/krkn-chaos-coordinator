@@ -40,7 +40,7 @@ class BaseDomainAgent(ABC):
         memory: MemoryStore | None = None,
         neo4j_store: Neo4jStore | None = None,
         use_llm: bool = False,
-        max_bugs: int = 50,
+        max_bugs: int = 200,
         days: int = 14,
     ):
         self.agent_name = agent_name

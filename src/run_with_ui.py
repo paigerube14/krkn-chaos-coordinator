@@ -1,9 +1,14 @@
 """Run krkn-chaos-coordinator with Rich terminal UI."""
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from rich.live import Live
 
@@ -38,8 +43,10 @@ def bugs_from_jira_json(jira_data: dict) -> list[Bug]:
     return bugs
 
 
-def run_with_ui(jira_json_path: str, krkn_repo_path: str = "/Users/sahil/krkn"):
+def run_with_ui(jira_json_path: str, krkn_repo_path: str | None = None):
     """Run the full pipeline with Rich live dashboard."""
+    if krkn_repo_path is None:
+        krkn_repo_path = os.environ.get("KRKN_REPO_PATH", str(Path.home() / "krkn"))
     ui = TerminalUI(release="4.21")
     ui.init_agents([
         "control_plane", "networking", "node_machine",
@@ -220,5 +227,5 @@ def run_with_ui(jira_json_path: str, krkn_repo_path: str = "/Users/sahil/krkn"):
 
 if __name__ == "__main__":
     jira_path = sys.argv[1] if len(sys.argv) > 1 else "tests/fixtures/jira_etcd_bugs.json"
-    krkn_path = sys.argv[2] if len(sys.argv) > 2 else "/Users/sahil/krkn"
+    krkn_path = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("KRKN_REPO_PATH", str(Path.home() / "krkn"))
     run_with_ui(jira_path, krkn_path)

@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 def run_from_filtered(
     filtered_bugs: list[dict],
-    krkn_repo_path: str = "/Users/sahil/krkn",
+    krkn_repo_path: str | None = None,
 ) -> AgentResult:
     """Run MAP → ANALYZE on pre-filtered bugs.
 
@@ -32,6 +32,8 @@ def run_from_filtered(
             failure_mode, injection_method
         krkn_repo_path: Path to local krkn repo
     """
+    if krkn_repo_path is None:
+        krkn_repo_path = os.environ.get("KRKN_REPO_PATH", str(Path.home() / "krkn"))
     # Convert to Bug objects
     bugs = []
     filter_results = []

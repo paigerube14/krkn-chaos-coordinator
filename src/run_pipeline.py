@@ -2,7 +2,12 @@
 
 import json
 import logging
+import os
 from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from src.filter.chaos_filter import filter_bugs
 from src.knowledge.chromadb_store import ChromaStore, DocChunk
@@ -46,13 +51,15 @@ def bugs_from_jira_json(jira_data: dict) -> list[Bug]:
     return bugs
 
 
-def run_pipeline(jira_json_path: str, krkn_repo_path: str = "/Users/sahil/krkn") -> AgentResult:
+def run_pipeline(jira_json_path: str, krkn_repo_path: str | None = None) -> AgentResult:
     """Run the full DISCOVER → FILTER → MAP → ANALYZE pipeline.
 
     Args:
         jira_json_path: Path to saved JIRA MCP JSON response
         krkn_repo_path: Path to local krkn repo
     """
+    if krkn_repo_path is None:
+        krkn_repo_path = os.environ.get("KRKN_REPO_PATH", str(Path.home() / "krkn"))
     # DISCOVER
     logger.info("=== DISCOVER ===")
     with open(jira_json_path) as f:
@@ -174,7 +181,7 @@ if __name__ == "__main__":
         sys.exit(1)
 
     jira_path = sys.argv[1]
-    krkn_path = sys.argv[2] if len(sys.argv) > 2 else "/Users/sahil/krkn"
+    krkn_path = sys.argv[2] if len(sys.argv) > 2 else os.environ.get("KRKN_REPO_PATH", str(Path.home() / "krkn"))
 
     result = run_pipeline(jira_path, krkn_path)
 

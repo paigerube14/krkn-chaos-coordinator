@@ -534,7 +534,7 @@ st.markdown("""
 with st.sidebar:
     st.markdown("### ⚙ Configuration")
     release = st.text_input("OCP Release", value="4.21")
-    krkn_path = st.text_input("krkn repo", value="/Users/sahil/krkn")
+    krkn_path = st.text_input("krkn repo", value=os.environ.get("KRKN_REPO_PATH", str(Path.home() / "krkn")))
     data_source = st.radio("Data Source", ["JIRA (saved JSON)", "JIRA (live query)"], index=0)
     jira_path = st.text_input("JIRA data file", value="tests/fixtures/jira_etcd_bugs.json",
                                disabled=(data_source != "JIRA (saved JSON)"))

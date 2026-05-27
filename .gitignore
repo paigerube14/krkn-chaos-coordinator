@@ -10,3 +10,4 @@ build/
 htmlcov/
 .coverage
 chroma_data/
+coordinator_memory.json

@@ -167,10 +167,13 @@ class TestClaudeCodeCallLlm:
         assert "claude-sonnet-4-6" in cmd
         assert "--output-format" in cmd
         assert "json" in cmd
+        assert "--bare" in cmd
+        assert "--exclude-dynamic-system-prompt-sections" in cmd
+        assert "--system-prompt" in cmd
         assert result == '{"relevant": true}'
 
     @patch("subprocess.run")
-    def test_flattens_system_and_user_messages(self, mock_run: MagicMock) -> None:
+    def test_separates_system_and_user_messages(self, mock_run: MagicMock) -> None:
         import json
         mock_run.return_value = subprocess.CompletedProcess(
             args=[], returncode=0,
@@ -189,8 +192,10 @@ class TestClaudeCodeCallLlm:
 
         cmd = mock_run.call_args.args[0]
         prompt_arg = cmd[cmd.index("-p") + 1]
-        assert "System prompt here." in prompt_arg
         assert "User question here." in prompt_arg
+        assert "System prompt here." not in prompt_arg
+        sys_idx = cmd.index("--system-prompt")
+        assert cmd[sys_idx + 1] == "System prompt here."
 
     @patch("subprocess.run")
     def test_raises_on_nonzero_exit(self, mock_run: MagicMock) -> None:

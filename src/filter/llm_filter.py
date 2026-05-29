@@ -118,18 +118,26 @@ def call_llm(
         import subprocess
 
         effective_messages = _prepend_system_message(messages, system_prompt)
-        prompt_parts = []
+        sys_parts = []
+        user_parts = []
         for msg in effective_messages:
             if msg["role"] == "system":
-                prompt_parts.append(msg["content"])
+                sys_parts.append(msg["content"])
             elif msg["role"] == "user":
-                prompt_parts.append(msg["content"])
-        full_prompt = "\n\n".join(prompt_parts)
+                user_parts.append(msg["content"])
+        full_prompt = "\n\n".join(user_parts)
 
-        result = subprocess.run(
-            ["claude", "-p", full_prompt, "--model", config.model, "--output-format", "json"],
-            capture_output=True, text=True, timeout=120,
-        )
+        cmd = [
+            "claude", "-p", full_prompt,
+            "--model", config.model,
+            "--output-format", "json",
+            "--bare",
+            "--exclude-dynamic-system-prompt-sections",
+        ]
+        if sys_parts:
+            cmd.extend(["--system-prompt", "\n\n".join(sys_parts)])
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             raise RuntimeError(f"Claude Code CLI failed: {result.stderr[:200]}")
 

@@ -34,7 +34,7 @@ for candidate in python3.11 python3.12 python3.13 python3; do
         minor=$("$candidate" -c "import sys; print(sys.version_info.minor)")
         if [ "$major" -ge 3 ] && [ "$minor" -ge 11 ]; then
             PYTHON="$candidate"
-            ok "Found $candidate ($ver)"
+            ok "Found $candidate ($major.$minor)"
             break
         fi
     fi

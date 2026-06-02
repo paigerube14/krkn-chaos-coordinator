@@ -1,10 +1,17 @@
-"""Pipeline status line — shows current phase and progress with colors."""
+"""Pipeline status line — shows current phase and progress.
+
+Auto-detects terminal vs piped output:
+- Terminal: colored ANSI status lines with progress bars
+- Piped/captured (e.g., Claude Code): plain text phase summaries
+"""
 
 from __future__ import annotations
 
 import sys
 
-# Colors
+_IS_TTY = sys.stderr.isatty()
+
+# Colors (only used in TTY mode)
 CYAN = "\033[0;36m"
 GREEN = "\033[0;32m"
 YELLOW = "\033[1;33m"
@@ -48,7 +55,10 @@ def _dots(phase: str) -> str:
 
 
 def status(agent: str, phase: str, message: str, done: int = 0, total: int = 0) -> None:
-    """Print a status line showing agent, phase, progress bar, and message."""
+    """Print a status line. In-place update in TTY, silent in piped mode."""
+    if not _IS_TTY:
+        return
+
     dots = _dots(phase)
     color = PHASE_COLORS.get(phase, NC)
 
@@ -65,10 +75,14 @@ def status(agent: str, phase: str, message: str, done: int = 0, total: int = 0) 
 
 
 def status_done(agent: str, phase: str, message: str) -> None:
-    """Print a completed status line (with newline)."""
-    dots = _dots(phase)
-    color = PHASE_COLORS.get(phase, NC)
-    bar = _bar(1, 1)
-    line = f"{DIM}[{NC}{BOLD}{agent}{NC}{DIM}]{NC} {dots} {color}{phase:8s}{NC} {bar} {GREEN}{message}{NC}"
-    sys.stderr.write(f"\033[2K\r{line}\n")
-    sys.stderr.flush()
+    """Print a completed status line. Colorful in TTY, plain in piped mode."""
+    if _IS_TTY:
+        dots = _dots(phase)
+        color = PHASE_COLORS.get(phase, NC)
+        bar = _bar(1, 1)
+        line = f"{DIM}[{NC}{BOLD}{agent}{NC}{DIM}]{NC} {dots} {color}{phase:8s}{NC} {bar} {GREEN}{message}{NC}"
+        sys.stderr.write(f"\033[2K\r{line}\n")
+        sys.stderr.flush()
+    else:
+        sys.stderr.write(f"[{agent}] {phase:8s} — {message}\n")
+        sys.stderr.flush()

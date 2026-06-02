@@ -2,14 +2,14 @@
 
 AI-driven multi-agent system that autonomously expands [krkn](https://github.com/krkn-chaos/krkn) chaos test coverage for OpenShift clusters by monitoring JIRA bugs, identifying coverage gaps, and creating PRs/issues.
 
-**Current stats (June 2026):** 3,000+ bugs analyzed, 465+ gaps identified, 200 tests passing, $0.18/run with claude_code provider.
+**Current stats (June 2026):** 3,000+ bugs analyzed, 484+ gaps identified, 200 tests passing, $1.13 for a full 6-agent production run (205 bugs scanned).
 
 ## How It Works
 
 ```
 DISCOVER → FILTER → MAP → ANALYZE → ACT → REMEMBER
 
-1. DISCOVER   Query JIRA (three-tier version matching) + z-stream changelogs
+1. DISCOVER   Query JIRA (4-tier version matching) + z-stream changelogs
 2. FILTER     3-tier: keyword pre-filter → semantic cache → LLM classification
 3. MAP        ChromaDB RAG + LLM reasoning over existing krkn scenarios
 4. ANALYZE    Score confidence (0-100), generate specific krkn modifications
@@ -37,19 +37,32 @@ Pluggable agents — auto-discovered from `config/agents/*.yaml`. 6 built-in age
 | Store | Purpose | Data |
 |-------|---------|------|
 | **ChromaDB** | Vector search (RAG context for LLM) | 4,089+ chunks: krkn scenarios, krkn docs, OCP docs, agent-specific docs, filter cache |
-| **Neo4j** | Operational memory (dedup, history) | 3,000+ bugs, 465+ gaps, component relationships, run metrics |
+| **Neo4j** | Operational memory (dedup, history) | 3,000+ bugs, 484+ gaps, component relationships, run metrics |
+
+## JIRA Version Query (4-Tier)
+
+When `--release 4.21` is set, bugs are fetched using 4-tier matching to catch everything:
+
+| Tier | What it catches | JQL Filter |
+|------|----------------|------------|
+| 1 | Exact release match | `affectedVersion >= "4.21" AND < "4.22"` (catches 4.21, 4.21.0, 4.21.z, 4.21.5, etc.) |
+| 2 | Older versions, still open | `affectedVersion < "4.21" AND status NOT IN (Closed, Verified)` |
+| 3 | Newer versions, still open | `affectedVersion >= "4.22" AND status NOT IN (Closed, Verified)` (if it exists on 5.0, it exists on 4.21 too) |
+| 4 | No version set | `affectedVersion IS EMPTY` |
+
+Closed/Verified bugs on other versions are correctly excluded — they're already fixed.
 
 ## LLM Providers
 
 5 pluggable backends, configurable per-phase:
 
-| Provider | Description |
-|----------|-------------|
-| `claude_code` | Claude Code CLI — no API key needed (default when `claude` is on PATH) |
-| `anthropic` | Direct API with prompt caching + batch API |
-| `ollama` | Local models, free, private |
-| `openai` | GPT-4o compatible |
-| `google` | Gemini compatible |
+| Provider | Description | API Key Required |
+|----------|-------------|-----------------|
+| `claude_code` | Claude Code CLI — uses your existing subscription | No (auto-detected when `claude` is on PATH) |
+| `anthropic` | Direct API with prompt caching + batch API | Yes (`ANTHROPIC_API_KEY`) |
+| `ollama` | Local models (qwen2.5-coder, llama3, etc.) | No (auto-detected when running) |
+| `openai` | GPT-4o compatible | Yes (`OPENAI_API_KEY`) |
+| `google` | Gemini compatible | Yes (`GOOGLE_API_KEY`) |
 
 Per-phase model routing: `LLM_FILTER_MODEL=claude-sonnet-4-6`, `LLM_ANALYZE_MODEL=claude-opus-4-6`
 
@@ -66,47 +79,150 @@ Per-phase model routing: `LLM_FILTER_MODEL=claude-sonnet-4-6`, `LLM_ANALYZE_MODE
 
 With `claude_code` provider: `--bare --system-prompt` strips 62K system prompt overhead → ~2,700 tokens per call.
 
-## Quick Start
+---
 
-### Prerequisites
+## Setup Guide (New Users)
 
-- Python 3.11+
-- Podman (for Neo4j)
-- krkn repo cloned locally (required for scenario indexing)
-- JIRA API token + GitHub PAT
+### Step 1: Prerequisites
 
-### Setup
+| Requirement | Version | Check |
+|-------------|---------|-------|
+| Python | 3.11+ | `python3 --version` |
+| Podman or Docker | any | `podman --version` or `docker --version` |
+| Git | any | `git --version` |
+| Claude Code CLI | any (optional) | `claude --version` — needed only for `claude_code` LLM provider |
+
+### Step 2: Get API Tokens
+
+#### JIRA API Token (required)
+
+1. Go to [https://id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
+2. Click **Create API token**
+3. Name it (e.g., "krkn-chaos-coordinator")
+4. Copy the token — you'll need it for `JIRA_API_TOKEN` in `.env`
+5. Your JIRA username is your Red Hat email (e.g., `sahshah@redhat.com`)
+
+> **Note:** The token must have access to the OCPBUGS project on `https://redhat.atlassian.net`. If you can browse OCPBUGS issues in the browser, the token will work.
+
+#### GitHub Personal Access Token (required)
+
+1. Go to [https://github.com/settings/tokens](https://github.com/settings/tokens)
+2. Click **Generate new token (classic)**
+3. Select scopes: `repo` (full control of private repos) and `read:org`
+4. Copy the token — you'll need it for `GITHUB_TOKEN` in `.env`
+
+> **Note:** The token needs read access to `krkn-chaos/krkn`, `krkn-chaos/krkn-hub`, `krkn-chaos/website`, and `openshift/openshift-docs` repos. Write access is needed only if you want the ACT phase to create PRs/issues.
+
+### Step 3: Clone Repos
 
 ```bash
-# Clone
+# Clone this project
 git clone https://github.com/shahsahil264/krkn-chaos-coordinator.git
 cd krkn-chaos-coordinator
 
-# Clone krkn repo (required for MAP phase)
+# Clone krkn repo (required — the MAP phase reads scenario YAMLs from disk)
 git clone https://github.com/krkn-chaos/krkn ~/krkn
+```
 
-# Virtual environment
+### Step 4: Python Environment
+
+```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -e ".[dev]"
+```
 
-# Environment variables
+### Step 5: Configure Environment Variables
+
+```bash
 cp .env.example .env
-# Edit .env with: JIRA_API_TOKEN, JIRA_USERNAME, GITHUB_TOKEN, NEO4J_PASSWORD
+```
 
-# Start Neo4j (required)
+Edit `.env` with your values:
+
+```bash
+# Required
+JIRA_URL=https://redhat.atlassian.net
+JIRA_USERNAME=your-email@redhat.com
+JIRA_API_TOKEN=ATATT3x...your-token-here
+GITHUB_TOKEN=ghp_...your-token-here
+NEO4J_PASSWORD=password
+
+# Optional — LLM provider (auto-detected if not set)
+# LLM_PROVIDER=claude_code
+```
+
+Full environment variable reference:
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `JIRA_URL` | No | `https://redhat.atlassian.net` | JIRA instance URL |
+| `JIRA_USERNAME` | Yes | — | Your JIRA email |
+| `JIRA_API_TOKEN` | Yes | — | JIRA API token ([generate here](https://id.atlassian.com/manage-profile/security/api-tokens)) |
+| `GITHUB_TOKEN` | Yes | — | GitHub PAT ([generate here](https://github.com/settings/tokens)) |
+| `NEO4J_URI` | No | `bolt://localhost:7687` | Neo4j connection URI |
+| `NEO4J_USER` | No | `neo4j` | Neo4j username |
+| `NEO4J_PASSWORD` | Yes | — | Neo4j password (set when creating the container) |
+| `LLM_PROVIDER` | No | auto-detected | `claude_code`, `anthropic`, `ollama`, `openai`, `google`, or `none` |
+| `LLM_MODEL` | No | `claude-sonnet-4-6` | Model name for LLM calls |
+| `KRKN_REPO_PATH` | No | `~/krkn` | Path to local krkn repo clone |
+| `OCP_RELEASE` | No | `4.21` | Target OpenShift release |
+
+### Step 6: Start Neo4j
+
+```bash
+# First time — create the container
 podman run -d --name neo4j-coordinator \
   -p 7474:7474 -p 7687:7687 \
   -e NEO4J_AUTH=neo4j/password \
   neo4j:5-community
 
-# Ingest knowledge base (one-time, ~6 min)
+# Subsequent runs — just start it
+podman start neo4j-coordinator
+```
+
+Verify it's running: open [http://localhost:7474](http://localhost:7474) in a browser.
+
+### Step 7: Ingest Knowledge Base (one-time)
+
+```bash
 PYTHONPATH=. python -m src.knowledge.ingest ./chroma_data
 ```
 
-### Run
+This fetches documentation from GitHub (krkn scenarios, krkn-hub docs, OCP docs, plugin code) and indexes ~4,089 chunks into ChromaDB. Takes ~6 minutes. Only needs to be run once (or when you want to refresh docs).
 
-#### Option 1: Claude Code (recommended)
+### Step 8: Verify Setup
+
+```bash
+# Run tests (should show 200 passed)
+PYTHONPATH=. pytest tests/ -v
+
+# Verify JIRA connection
+PYTHONPATH=. python -c "
+from dotenv import load_dotenv; load_dotenv()
+import os
+from src.apis.jira_client import JiraClient, JiraConfig
+jira = JiraClient(JiraConfig(url=os.environ['JIRA_URL'], username=os.environ['JIRA_USERNAME'], api_token=os.environ['JIRA_API_TOKEN']))
+bugs = jira.get_bugs_by_components(['Etcd'], days=7, max_results=5, release='4.21')
+print(f'JIRA OK — found {len(bugs)} Etcd bugs')
+"
+
+# Verify Neo4j connection
+PYTHONPATH=. python -c "
+from dotenv import load_dotenv; load_dotenv()
+import os
+from src.knowledge.neo4j_store import Neo4jStore
+store = Neo4jStore(password=os.environ.get('NEO4J_PASSWORD', 'password'))
+print(f'Neo4j OK — connected: {store.connect()}')
+store.close()
+"
+```
+
+---
+
+## Running
+
+### Option 1: Claude Code (recommended)
 
 ```bash
 cd ~/krkn-chaos-coordinator
@@ -115,7 +231,7 @@ claude
 # Interactive: asks for OCP version + agent selection
 ```
 
-#### Option 2: CLI
+### Option 2: CLI
 
 ```bash
 # Single agent, single version
@@ -127,17 +243,25 @@ PYTHONPATH=. python src/main.py --release 4.21 --agent control_plane,networking 
 # Multiple versions
 PYTHONPATH=. python src/main.py --release 4.20,4.21 --use-llm
 
-# All agents, all defaults
+# All agents (production run)
 PYTHONPATH=. python src/main.py --release 4.21 --use-llm
+
+# Keyword filter only (no LLM, fast)
+PYTHONPATH=. python src/main.py --release 4.21
+
+# Custom lookback window
+PYTHONPATH=. python src/main.py --release 4.21 --use-llm --days 30
 ```
 
-#### Option 3: Streamlit Dashboard
+### Option 3: Streamlit Dashboard
 
 ```bash
 PYTHONPATH=. streamlit run src/ui/web_dashboard.py --server.port 8501
 ```
 
-### Adding a New Agent
+---
+
+## Adding a New Agent
 
 Create a single YAML file in `config/agents/`. No code changes needed.
 
@@ -152,7 +276,7 @@ components:
   - "Virtualization / virt-controller"
   - "Virtualization / virt-handler"
 
-# Domain-specific filter keywords (merged with common keywords)
+# Domain-specific filter keywords (merged with common keywords from config/filters/common.yaml)
 filter:
   chaos_keywords:
     - "vm migration failed"
@@ -161,7 +285,7 @@ filter:
   skip_keywords:
     - "cnv-must-gather"
 
-# Domain-specific docs for ChromaDB (improves LLM reasoning)
+# Domain-specific docs for ChromaDB (improves LLM reasoning for this domain)
 docs:
   - type: github
     owner: kubevirt
@@ -186,11 +310,13 @@ See [config/agents/README.md](config/agents/README.md) for full reference.
 
 ### Customizing Filter Keywords
 
-Common keywords shared across all agents live in `config/filters/common.yaml`. Agent-specific keywords are added via the `filter` section in each agent's YAML and merged on top of common keywords at runtime.
+Common keywords shared across all agents live in `config/filters/common.yaml`. Agent-specific keywords are added via the `filter` section in each agent's YAML and merged on top at runtime.
 
 See [config/filters/README.md](config/filters/README.md) for details.
 
-### Run Tests
+---
+
+## Run Tests
 
 ```bash
 # Unit tests (no external deps, ~0.2s)
@@ -234,7 +360,7 @@ src/
 │   ├── hub_generator.py           # krkn-hub boilerplate
 │   └── docs_generator.py          # Website docs
 ├── apis/
-│   ├── jira_client.py             # JIRA REST API (three-tier version query)
+│   ├── jira_client.py             # JIRA REST API (4-tier version query)
 │   ├── sippy_client.py            # Sippy regressions + health
 │   ├── github_client.py           # GitHub API
 │   └── release_client.py          # Z-stream changelog enrichment

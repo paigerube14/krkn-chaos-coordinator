@@ -138,11 +138,14 @@ Then: `--agent virtualization --use-llm`. See [config/agents/README.md](config/a
 2. **Semantic cache** — ChromaDB cosine similarity on past decisions (zero tokens)
 3. **LLM classification** — Sonnet with auto-escalation to Opus when confidence < 80
 
-### Three-Tier JIRA Version Query
+### 4-Tier JIRA Version Query
 When `--release 4.21` is set:
 - **Tier 1**: bugs tagged with 4.21.* (`affectedVersion >= 4.21 AND < 4.22`)
 - **Tier 2**: open bugs from older versions (unfixed, likely still present)
-- **Tier 3**: bugs with no `affectedVersion` set
+- **Tier 3**: open bugs from newer versions (if it exists on 5.0, it exists on 4.21 too)
+- **Tier 4**: bugs with no `affectedVersion` set
+
+Closed/Verified bugs on other versions are correctly excluded.
 
 ### Confidence Scoring
 - 70-100 (HIGH): Draft PRs across krkn + krkn-hub + website

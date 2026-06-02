@@ -2,8 +2,6 @@
 
 AI-driven multi-agent system that autonomously expands [krkn](https://github.com/krkn-chaos/krkn) chaos test coverage for OpenShift clusters by monitoring JIRA bugs, identifying coverage gaps, and creating PRs/issues.
 
-**Current stats (June 2026):** 3,000+ bugs analyzed, 484+ gaps identified, 200 tests passing, $1.13 for a full 6-agent production run (205 bugs scanned).
-
 ## How It Works
 
 ```
@@ -315,10 +313,6 @@ src/
     ├── terminal_ui.py             # Rich terminal dashboard
     └── web_dashboard.py           # Streamlit web dashboard
 ```
-
-## ADR
-
-Design document: [Confluence](https://redhat.atlassian.net/wiki/x/x4rTFg)
 
 ## License
 

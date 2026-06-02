@@ -6,315 +6,180 @@ AI-driven multi-agent system that autonomously expands [krkn](https://github.com
 
 ```
 DISCOVER → FILTER → MAP → ANALYZE → ACT → REMEMBER
-
-1. DISCOVER   Query JIRA (4-tier version matching) + z-stream changelogs
-2. FILTER     3-tier: keyword pre-filter → semantic cache → LLM classification
-3. MAP        ChromaDB RAG + LLM reasoning over existing krkn scenarios
-4. ANALYZE    Score confidence (0-100), generate specific krkn modifications
-5. ACT        Create GitHub issues (MEDIUM) or draft PRs (HIGH confidence)
-6. REMEMBER   Store in Neo4j graph — never re-analyze the same bug
 ```
 
-## Architecture
+| Phase | What it does |
+|-------|-------------|
+| **DISCOVER** | Query JIRA bugs (4-tier version matching) + z-stream changelogs |
+| **FILTER** | 3-tier: keyword pre-filter → semantic cache → LLM classification |
+| **MAP** | ChromaDB RAG + LLM reasoning over existing krkn scenarios |
+| **ANALYZE** | Score confidence (0-100), generate specific krkn modifications |
+| **ACT** | Create GitHub issues or draft PRs based on confidence |
+| **REMEMBER** | Store in Neo4j — never re-analyze the same bug |
 
-```
-Orchestrator (dedup, approval queue)
-├── Control Plane          (Etcd, kube-apiserver, HyperShift)
-├── Networking             (OVN-K, DNS, router, SR-IOV, MetalLB)
-├── Node & Machine         (Kubelet, CRI-O, Machine API, Bare Metal)
-├── Storage                (CSI, Image Registry, LVMS)
-├── Operators & Platform   (OLM, Console, Auth, Monitoring, Cloud Compute)
-├── Upgrade & Lifecycle    (CVO, MCO, Installer variants)
-└── <your agent here>      (drop a YAML in config/agents/)
-```
+6 pluggable domain agents (control plane, networking, node/machine, storage, operators, upgrade), auto-discovered from `config/agents/*.yaml`. [Add your own →](config/agents/README.md)
 
-Pluggable agents — auto-discovered from `config/agents/*.yaml`. 6 built-in agents covering 113 OCPBUGS components. Drop a YAML file to add a new domain.
-
-## Knowledge Layer
-
-| Store | Purpose | Data |
-|-------|---------|------|
-| **ChromaDB** | Vector search (RAG context for LLM) | 4,089+ chunks: krkn scenarios, krkn docs, OCP docs, agent-specific docs, filter cache |
-| **Neo4j** | Operational memory (dedup, history) | 3,000+ bugs, 484+ gaps, component relationships, run metrics |
-
-## JIRA Version Query (4-Tier)
-
-When `--release 4.21` is set, bugs are fetched using 4-tier matching to catch everything:
-
-| Tier | What it catches | JQL Filter |
-|------|----------------|------------|
-| 1 | Exact release match | `affectedVersion >= "4.21" AND < "4.22"` (catches 4.21, 4.21.0, 4.21.z, 4.21.5, etc.) |
-| 2 | Older versions, still open | `affectedVersion < "4.21" AND status NOT IN (Closed, Verified)` |
-| 3 | Newer versions, still open | `affectedVersion >= "4.22" AND status NOT IN (Closed, Verified)` (if it exists on 5.0, it exists on 4.21 too) |
-| 4 | No version set | `affectedVersion IS EMPTY` |
-
-Closed/Verified bugs on other versions are correctly excluded — they're already fixed.
-
-## LLM Providers
-
-5 pluggable backends, configurable per-phase:
-
-| Provider | Description | API Key Required |
-|----------|-------------|-----------------|
-| `claude_code` | Claude Code CLI — uses your existing subscription | No (auto-detected when `claude` is on PATH) |
-| `anthropic` | Direct API with prompt caching + batch API | Yes (`ANTHROPIC_API_KEY`) |
-| `ollama` | Local models (qwen2.5-coder, llama3, etc.) | No (auto-detected when running) |
-| `openai` | GPT-4o compatible | Yes (`OPENAI_API_KEY`) |
-| `google` | Gemini compatible | Yes (`GOOGLE_API_KEY`) |
-
-Per-phase model routing: `LLM_FILTER_MODEL=claude-sonnet-4-6`, `LLM_ANALYZE_MODEL=claude-opus-4-6`
-
-## Token Optimization
-
-6-layer stack reduces cost by 91%:
-
-1. **Keyword pre-filter** — configurable keywords in `config/filters/common.yaml` + per-agent overrides, catches ~55% (zero tokens)
-2. **Semantic cache** — ChromaDB cosine similarity on past decisions (zero tokens)
-3. **Model routing** — Sonnet for FILTER/MAP, Opus for ANALYZE
-4. **Confidence escalation** — Sonnet → Opus only when uncertain (<80)
-5. **Prompt caching** — `cache_control` on system prompts (90% off)
-6. **Batch API** — 50% off, stacks with caching
-
-With `claude_code` provider: `--bare --system-prompt` strips 62K system prompt overhead → ~2,700 tokens per call.
-
----
-
-## Setup
-
-### Quick Setup (recommended)
+## Quick Start
 
 ```bash
 git clone https://github.com/shahsahil264/krkn-chaos-coordinator.git
 cd krkn-chaos-coordinator
-./setup.sh
+./setup.sh                    # interactive — walks you through everything
 ```
 
-The interactive setup script walks you through everything: Python check, venv, krkn clone, credential prompts (JIRA, GitHub, Neo4j), container setup, and verification.
-
-After setup, run the one-time knowledge base ingestion (~6 min):
+Then ingest the knowledge base (one-time, ~6 min):
 ```bash
 source venv/bin/activate
 PYTHONPATH=. python -m src.knowledge.ingest ./chroma_data
 ```
 
-### Prerequisites
-
-Before running `./setup.sh`, you need:
-
-| Requirement | How to install |
-|-------------|---------------|
-| Python 3.11+ | `brew install python@3.11` (macOS) or `sudo dnf install python3.11` (RHEL) |
-| Podman or Docker | `brew install podman` (macOS) or `sudo dnf install podman` (RHEL) |
-| Git | Usually pre-installed |
-| Claude Code CLI (optional) | [claude.ai/download](https://claude.ai/download) — needed only for `claude_code` LLM provider |
-
-### Getting API Tokens
-
-The setup script will prompt you for these, but you can generate them in advance:
-
-**JIRA API Token:**
-1. Go to [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
-2. Click **Create API token**, name it anything
-3. Your username is your Red Hat email (e.g., `you@redhat.com`)
-
-**GitHub Personal Access Token:**
-1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
-2. Click **Generate new token (classic)**, select `repo` scope
-
-### Environment Variables
-
-All configuration lives in `.env` (created by setup script). Full reference:
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `JIRA_URL` | No | `https://redhat.atlassian.net` | JIRA instance URL |
-| `JIRA_USERNAME` | Yes | — | Your JIRA email |
-| `JIRA_API_TOKEN` | Yes | — | JIRA API token |
-| `GITHUB_TOKEN` | Yes | — | GitHub PAT |
-| `NEO4J_PASSWORD` | Yes | `password` | Neo4j password |
-| `NEO4J_URI` | No | `bolt://localhost:7687` | Neo4j connection URI |
-| `LLM_PROVIDER` | No | auto-detected | `claude_code`, `anthropic`, `ollama`, `openai`, `google`, or `none` |
-| `LLM_MODEL` | No | `claude-sonnet-4-6` | Model name for LLM calls |
-| `KRKN_REPO_PATH` | No | `~/krkn` | Path to local krkn repo clone |
-| `OCP_RELEASE` | No | `4.21` | Target OpenShift release |
-
----
+> **Prerequisites:** Python 3.11+, Podman or Docker, Git. The setup script checks for these and tells you how to install anything missing. It prompts for JIRA and GitHub tokens with links to generate them.
 
 ## Running
 
-### Option 1: Claude Code (recommended)
-
+**Claude Code (recommended):**
 ```bash
-cd ~/krkn-chaos-coordinator
 claude
-# Then type: /krkn-chaos-scan
-# Interactive: asks for OCP version, agents, lookback days, and scan type
+/krkn-chaos-scan              # interactive — asks version, agents, scan type
 ```
 
-### Option 2: CLI
-
+**CLI:**
 ```bash
-# Single agent, single version
-PYTHONPATH=. python src/main.py --release 4.21 --agent control_plane --use-llm
-
-# Multiple agents
-PYTHONPATH=. python src/main.py --release 4.21 --agent control_plane,networking --use-llm
-
-# Multiple versions
-PYTHONPATH=. python src/main.py --release 4.20,4.21 --use-llm
-
-# All agents (production run)
-PYTHONPATH=. python src/main.py --release 4.21 --use-llm
-
-# Keyword filter only (no LLM, fast)
-PYTHONPATH=. python src/main.py --release 4.21
-
-# Custom lookback window
-PYTHONPATH=. python src/main.py --release 4.21 --use-llm --days 30
+PYTHONPATH=. python src/main.py --release 4.21 --use-llm                          # all agents
+PYTHONPATH=. python src/main.py --release 4.21 --agent control_plane --use-llm    # single agent
+PYTHONPATH=. python src/main.py --release 4.20,4.21 --agent networking,storage    # multi
 ```
 
-Pipeline progress is shown via a status line:
+**Status output:**
 ```
 [networking] ●●○○○○ FILTER   ████░░░░ 3/8 LLM 3/8 — OCPBUGS-86810
 [networking] ●●●●●● REMEMBER ████████ done — 2 gaps, 10 LLM calls, $0.27
 ```
 
-In a terminal: colored with animated progress bars. In Claude Code: clean plain text.
-Verbose logs go to `krkn-chaos-coordinator.log` (not printed to screen).
-
-### Option 3: Streamlit Dashboard
-
-```bash
-PYTHONPATH=. streamlit run src/ui/web_dashboard.py --server.port 8501
-```
-
----
-
 ## Adding a New Agent
 
-Create a single YAML file in `config/agents/`. No code changes needed.
+Create one YAML file in `config/agents/`. No code changes needed.
 
 ```yaml
 # config/agents/virtualization.yaml
 name: virtualization
 description: "OpenShift Virtualization / CNV / KubeVirt"
-
-# JIRA components this agent monitors
 components:
   - "OpenShift Virtualization"
   - "Virtualization / virt-controller"
-  - "Virtualization / virt-handler"
-
-# Domain-specific filter keywords (merged with common keywords from config/filters/common.yaml)
 filter:
   chaos_keywords:
     - "vm migration failed"
     - "virt-launcher crash"
-    - "live migrate timeout"
-  skip_keywords:
-    - "cnv-must-gather"
-
-# Domain-specific docs for ChromaDB (improves LLM reasoning for this domain)
 docs:
   - type: github
     owner: kubevirt
     repo: kubevirt
     path: docs
-  - type: local
-    path: ~/my-cnv-docs
-  - type: url
-    url: https://kubevirt.io/user-guide/architecture/
 ```
 
-Then:
-```bash
-# Ingest docs (if you added a docs section)
-PYTHONPATH=. python -m src.knowledge.ingest ./chroma_data
+Then: `PYTHONPATH=. python src/main.py --release 4.21 --agent virtualization --use-llm`
 
-# Run the agent
-PYTHONPATH=. python src/main.py --release 4.21 --agent virtualization --use-llm
-```
+Full reference: [config/agents/README.md](config/agents/README.md) | Filter keywords: [config/filters/README.md](config/filters/README.md)
 
-See [config/agents/README.md](config/agents/README.md) for full reference.
+## Key Design Decisions
 
-### Customizing Filter Keywords
+<details>
+<summary><b>4-tier JIRA version query</b></summary>
 
-Common keywords shared across all agents live in `config/filters/common.yaml`. Agent-specific keywords are added via the `filter` section in each agent's YAML and merged on top at runtime.
+| Tier | Catches |
+|------|---------|
+| 1 | Bugs tagged with target release (4.21.*) |
+| 2 | Open bugs from older versions (unfixed) |
+| 3 | Open bugs from newer versions (if it exists on 5.0, it exists on 4.21) |
+| 4 | Bugs with no version set |
 
-See [config/filters/README.md](config/filters/README.md) for details.
+Closed/Verified bugs on other versions are excluded.
+</details>
 
----
+<details>
+<summary><b>Token optimization (91% cost reduction)</b></summary>
 
-## Run Tests
+1. **Keyword pre-filter** — catches ~55% at zero tokens
+2. **Semantic cache** — ChromaDB reuses past LLM decisions
+3. **Model routing** — Sonnet for FILTER/MAP, Opus for ANALYZE
+4. **Confidence escalation** — Sonnet → Opus only when uncertain
+5. **Prompt caching** — 90% off repeated system prompts
+6. **Batch API** — 50% off, stacks with caching
 
-```bash
-# Unit tests (no external deps, ~0.2s)
-PYTHONPATH=. pytest tests/unit/ -v                    # 187 tests
+`claude_code` provider: `--bare` strips 62K system prompt overhead → ~2,700 tokens/call.
+</details>
 
-# Integration tests (requires Neo4j)
-PYTHONPATH=. pytest tests/integration/ -v             # 13 tests
+<details>
+<summary><b>5 LLM providers</b></summary>
 
-# All tests
-PYTHONPATH=. pytest tests/ -v                         # 200 total
+| Provider | API Key | Notes |
+|----------|---------|-------|
+| `claude_code` | No | Auto-detected when `claude` CLI is on PATH |
+| `anthropic` | Yes | Production — prompt caching + batch API |
+| `ollama` | No | Local models, free |
+| `openai` | Yes | GPT-4o compatible |
+| `google` | Yes | Gemini compatible |
 
-# Run filter eval (Sonnet vs Haiku comparison)
-PYTHONPATH=. python -m src.evals.filter_eval --sample-size 20
-```
+Per-phase routing: `LLM_FILTER_MODEL=claude-sonnet-4-6`, `LLM_ANALYZE_MODEL=claude-opus-4-6`
+</details>
 
-## Project Structure
+<details>
+<summary><b>Environment variables</b></summary>
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `JIRA_USERNAME` | Yes | — | Your JIRA email |
+| `JIRA_API_TOKEN` | Yes | — | [Generate here](https://id.atlassian.com/manage-profile/security/api-tokens) |
+| `GITHUB_TOKEN` | Yes | — | [Generate here](https://github.com/settings/tokens) |
+| `NEO4J_PASSWORD` | Yes | `password` | Neo4j password |
+| `LLM_PROVIDER` | No | auto-detected | `claude_code`, `anthropic`, `ollama`, `openai`, `google`, `none` |
+| `KRKN_REPO_PATH` | No | `~/krkn` | Path to local krkn clone |
+| `OCP_RELEASE` | No | `4.21` | Target OpenShift release |
+</details>
+
+<details>
+<summary><b>Project structure</b></summary>
 
 ```
 config/
-├── agents/                        # Drop a YAML file here to add a new agent
-│   ├── control_plane.yaml         # 6 built-in agents (name, components, filter, docs)
-│   ├── networking.yaml
-│   ├── node_machine.yaml
-│   ├── storage.yaml
-│   ├── operators_platform.yaml
-│   └── upgrade_lifecycle.yaml
+├── agents/                    # Drop a YAML to add a new agent
+│   ├── control_plane.yaml
+│   └── ...
 └── filters/
-    └── common.yaml                # Shared filter keywords (skip + chaos)
+    └── common.yaml            # Shared filter keywords
 
 src/
-├── main.py                        # CLI entry point (multi-version, multi-agent)
-├── models.py                      # Domain models (Bug, Gap, Observation, RunMetrics)
-├── reasoning.py                   # LLM reasoning for MAP + ANALYZE phases
-├── status.py                      # Pipeline status line (colored TTY / plain text piped)
-├── logging_util.py                # Structured JSON logging (writes to .log file)
-├── coordinator/
-│   └── orchestrator.py            # Dedup, approval queue, run summary
+├── main.py                    # CLI entry point
+├── status.py                  # Pipeline status line
+├── models.py                  # Domain models
+├── reasoning.py               # LLM reasoning for MAP + ANALYZE
 ├── agents/
-│   ├── base_agent.py              # Pipeline: DISCOVER→FILTER→MAP→ANALYZE→ACT→REMEMBER
-│   ├── registry.py                # Auto-discovers agents from config/agents/*.yaml
-│   ├── pr_creator.py              # Draft PR creation
-│   ├── hub_generator.py           # krkn-hub boilerplate
-│   └── docs_generator.py          # Website docs
+│   ├── base_agent.py          # Pipeline: DISCOVER→REMEMBER
+│   └── registry.py            # Auto-discovers agents from YAML
 ├── apis/
-│   ├── jira_client.py             # JIRA REST API (4-tier version query)
-│   ├── sippy_client.py            # Sippy regressions + health
-│   ├── github_client.py           # GitHub API
-│   └── release_client.py          # Z-stream changelog enrichment
+│   ├── jira_client.py         # JIRA REST API (4-tier version query)
+│   ├── github_client.py       # GitHub API
+│   └── release_client.py      # Z-stream changelog enrichment
 ├── knowledge/
-│   ├── chromadb_store.py          # Vector search (4 collections)
-│   ├── neo4j_store.py             # Graph memory (single backend)
-│   ├── component_map.py           # Delegates to registry for agent → component mapping
-│   ├── ingest.py                  # Doc ingestion (GitHub, local, URL + agent-specific)
-│   ├── filter_cache.py            # Semantic cache (Cache-Aside pattern)
-│   ├── scenario_index.py          # Index krkn scenario YAMLs
-│   └── scenario_knowledgebase.py  # krkn-knowledgebase integration
+│   ├── chromadb_store.py      # Vector search (4 collections)
+│   ├── neo4j_store.py         # Graph memory
+│   ├── ingest.py              # Doc ingestion (GitHub, local, URL)
+│   └── filter_cache.py        # Semantic cache
 ├── filter/
-│   ├── chaos_filter.py            # Keyword filter (loads from config/filters/ + agent YAML)
-│   ├── llm_filter.py              # LLM filter (5 providers, token tracking)
-│   ├── llm_config.py              # Per-phase model routing + auto-detection
-│   ├── llm_tools.py               # Typed tool functions with Observation returns
-│   └── llm_batch.py               # Anthropic Batch API support
-├── evals/
-│   ├── filter_eval.py             # Model comparison eval
-│   ├── sampler.py                 # Stratified bug sampler
-│   └── eval_report.py             # Eval metrics + pass criteria
-└── ui/
-    ├── terminal_ui.py             # Rich terminal dashboard
-    └── web_dashboard.py           # Streamlit web dashboard
+│   ├── chaos_filter.py        # Keyword filter (from YAML config)
+│   ├── llm_filter.py          # LLM filter (5 providers, token tracking)
+│   ├── llm_config.py          # Per-phase model routing
+│   └── llm_tools.py           # Typed tool functions
+└── evals/
+    └── filter_eval.py         # Model comparison eval
+```
+</details>
+
+## Tests
+
+```bash
+PYTHONPATH=. pytest tests/ -v       # 200 tests (187 unit + 13 integration)
 ```
 
 ## License

@@ -81,7 +81,9 @@ With `claude_code` provider: `--bare --system-prompt` strips 62K system prompt o
 
 ---
 
-## Quick Setup (one command)
+## Setup
+
+### Quick Setup (recommended)
 
 ```bash
 git clone https://github.com/shahsahil264/krkn-chaos-coordinator.git
@@ -89,144 +91,61 @@ cd krkn-chaos-coordinator
 ./setup.sh
 ```
 
-The setup script handles: Python venv, dependencies, krkn repo clone, `.env` creation, Neo4j container, and verification. Edit `.env` with your JIRA/GitHub tokens when prompted.
+The interactive setup script walks you through everything:
 
-## Manual Setup Guide (New Users)
+1. **Python** — finds 3.11+ or tells you how to install it
+2. **Virtual environment** — creates venv and installs all dependencies
+3. **krkn repo** — clones the krkn scenario repo (or asks for your existing clone path)
+4. **Credentials** — prompts for JIRA token, GitHub PAT, and Neo4j password with links to generate each one
+5. **Neo4j** — creates and starts the container (podman or docker)
+6. **Verification** — tests JIRA + Neo4j connectivity, discovers agents, runs test suite
 
-### Step 1: Prerequisites
-
-| Requirement | Version | Check |
-|-------------|---------|-------|
-| Python | 3.11+ | `python3 --version` |
-| Podman or Docker | any | `podman --version` or `docker --version` |
-| Git | any | `git --version` |
-| Claude Code CLI | any (optional) | `claude --version` — needed only for `claude_code` LLM provider |
-
-### Step 2: Get API Tokens
-
-#### JIRA API Token (required)
-
-1. Go to [https://id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
-2. Click **Create API token**
-3. Name it (e.g., "krkn-chaos-coordinator")
-4. Copy the token — you'll need it for `JIRA_API_TOKEN` in `.env`
-5. Your JIRA username is your Red Hat email (e.g., `sahshah@redhat.com`)
-
-> **Note:** The token must have access to the OCPBUGS project on `https://redhat.atlassian.net`. If you can browse OCPBUGS issues in the browser, the token will work.
-
-#### GitHub Personal Access Token (required)
-
-1. Go to [https://github.com/settings/tokens](https://github.com/settings/tokens)
-2. Click **Generate new token (classic)**
-3. Select scopes: `repo` (full control of private repos) and `read:org`
-4. Copy the token — you'll need it for `GITHUB_TOKEN` in `.env`
-
-> **Note:** The token needs read access to `krkn-chaos/krkn`, `krkn-chaos/krkn-hub`, `krkn-chaos/website`, and `openshift/openshift-docs` repos. Write access is needed only if you want the ACT phase to create PRs/issues.
-
-### Step 3: Clone Repos
-
+After setup completes, run the knowledge base ingestion (one-time, ~6 min):
 ```bash
-# Clone this project
-git clone https://github.com/shahsahil264/krkn-chaos-coordinator.git
-cd krkn-chaos-coordinator
-
-# Clone krkn repo (required — the MAP phase reads scenario YAMLs from disk)
-git clone https://github.com/krkn-chaos/krkn ~/krkn
-```
-
-### Step 4: Python Environment
-
-```bash
-python3 -m venv venv
 source venv/bin/activate
-pip install -e ".[dev]"
+PYTHONPATH=. python -m src.knowledge.ingest ./chroma_data
 ```
 
-### Step 5: Configure Environment Variables
+### Prerequisites
 
-```bash
-cp .env.example .env
-```
+Before running `./setup.sh`, you need:
 
-Edit `.env` with your values:
+| Requirement | How to install |
+|-------------|---------------|
+| Python 3.11+ | `brew install python@3.11` (macOS) or `sudo dnf install python3.11` (RHEL) |
+| Podman or Docker | `brew install podman` (macOS) or `sudo dnf install podman` (RHEL) |
+| Git | Usually pre-installed |
+| Claude Code CLI (optional) | [claude.ai/download](https://claude.ai/download) — needed only for `claude_code` LLM provider |
 
-```bash
-# Required
-JIRA_URL=https://redhat.atlassian.net
-JIRA_USERNAME=your-email@redhat.com
-JIRA_API_TOKEN=ATATT3x...your-token-here
-GITHUB_TOKEN=ghp_...your-token-here
-NEO4J_PASSWORD=password
+### Getting API Tokens
 
-# Optional — LLM provider (auto-detected if not set)
-# LLM_PROVIDER=claude_code
-```
+The setup script will prompt you for these, but you can generate them in advance:
 
-Full environment variable reference:
+**JIRA API Token:**
+1. Go to [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
+2. Click **Create API token**, name it anything
+3. Your username is your Red Hat email (e.g., `you@redhat.com`)
+
+**GitHub Personal Access Token:**
+1. Go to [github.com/settings/tokens](https://github.com/settings/tokens)
+2. Click **Generate new token (classic)**, select `repo` scope
+
+### Environment Variables
+
+All configuration lives in `.env` (created by setup script). Full reference:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `JIRA_URL` | No | `https://redhat.atlassian.net` | JIRA instance URL |
 | `JIRA_USERNAME` | Yes | — | Your JIRA email |
-| `JIRA_API_TOKEN` | Yes | — | JIRA API token ([generate here](https://id.atlassian.com/manage-profile/security/api-tokens)) |
-| `GITHUB_TOKEN` | Yes | — | GitHub PAT ([generate here](https://github.com/settings/tokens)) |
+| `JIRA_API_TOKEN` | Yes | — | JIRA API token |
+| `GITHUB_TOKEN` | Yes | — | GitHub PAT |
+| `NEO4J_PASSWORD` | Yes | `password` | Neo4j password |
 | `NEO4J_URI` | No | `bolt://localhost:7687` | Neo4j connection URI |
-| `NEO4J_USER` | No | `neo4j` | Neo4j username |
-| `NEO4J_PASSWORD` | Yes | — | Neo4j password (set when creating the container) |
 | `LLM_PROVIDER` | No | auto-detected | `claude_code`, `anthropic`, `ollama`, `openai`, `google`, or `none` |
 | `LLM_MODEL` | No | `claude-sonnet-4-6` | Model name for LLM calls |
 | `KRKN_REPO_PATH` | No | `~/krkn` | Path to local krkn repo clone |
 | `OCP_RELEASE` | No | `4.21` | Target OpenShift release |
-
-### Step 6: Start Neo4j
-
-```bash
-# First time — create the container
-podman run -d --name neo4j-coordinator \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/password \
-  neo4j:5-community
-
-# Subsequent runs — just start it
-podman start neo4j-coordinator
-```
-
-Verify it's running: open [http://localhost:7474](http://localhost:7474) in a browser.
-
-### Step 7: Ingest Knowledge Base (one-time)
-
-```bash
-PYTHONPATH=. python -m src.knowledge.ingest ./chroma_data
-```
-
-This fetches documentation from GitHub (krkn scenarios, krkn-hub docs, OCP docs, plugin code) and indexes ~4,089 chunks into ChromaDB. Takes ~6 minutes. Only needs to be run once (or when you want to refresh docs).
-
-### Step 8: Verify Setup
-
-```bash
-# Run tests (should show 200 passed)
-PYTHONPATH=. pytest tests/ -v
-
-# Verify JIRA connection
-PYTHONPATH=. python -c "
-from dotenv import load_dotenv; load_dotenv()
-import os
-from src.apis.jira_client import JiraClient, JiraConfig
-jira = JiraClient(JiraConfig(url=os.environ['JIRA_URL'], username=os.environ['JIRA_USERNAME'], api_token=os.environ['JIRA_API_TOKEN']))
-bugs = jira.get_bugs_by_components(['Etcd'], days=7, max_results=5, release='4.21')
-print(f'JIRA OK — found {len(bugs)} Etcd bugs')
-"
-
-# Verify Neo4j connection
-PYTHONPATH=. python -c "
-from dotenv import load_dotenv; load_dotenv()
-import os
-from src.knowledge.neo4j_store import Neo4jStore
-store = Neo4jStore(password=os.environ.get('NEO4J_PASSWORD', 'password'))
-print(f'Neo4j OK — connected: {store.connect()}')
-store.close()
-"
-```
 
 ---
 

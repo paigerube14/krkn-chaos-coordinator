@@ -89,54 +89,15 @@ cd krkn-chaos-coordinator
 ./setup.sh
 ```
 
-# Clone the krkn repo locally (required for scenario indexing)
-git clone https://github.com/krkn-chaos/krkn ~/krkn
+The interactive setup script walks you through everything: Python check, venv, krkn clone, credential prompts (JIRA, GitHub, Neo4j), container setup, and verification.
 
-# Virtual environment
-python3 -m venv venv
+After setup, run the one-time knowledge base ingestion (~6 min):
+```bash
 source venv/bin/activate
-pip install -e ".[dev]"
-
-# Environment variables
-cp .env.example .env
-# Fill in your values — at minimum:
-#   JIRA_USERNAME=your-email@redhat.com
-#   JIRA_API_TOKEN=your-jira-api-token
-#   GITHUB_TOKEN=your-github-token
-#   KRKN_REPO_URL=https://github.com/<username>/krkn
-#   KRKN_REPO_PATH=~/krkn
-
-# Start Neo4j (optional, for Graphiti memory)
-podman run -d --name neo4j-coordinator \
-  -p 7474:7474 -p 7687:7687 \
-  -e NEO4J_AUTH=neo4j/password \
-  neo4j:5-community
-
-# Ingest knowledge base (one-time, ~6 min)
 PYTHONPATH=. python -m src.knowledge.ingest ./chroma_data
 ```
 
-### Environment Variables
-
-Edit `.env` with your values. Required fields:
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `JIRA_URL` | JIRA instance URL | `https://redhat.atlassian.net` |
-| `JIRA_USERNAME` | JIRA username / email | — |
-| `JIRA_API_TOKEN` | JIRA API token | — |
-| `GITHUB_TOKEN` | GitHub personal access token | — |
-| `KRKN_REPO_URL` | Upstream krkn GitHub URL | `https://github.com/krkn-chaos/krkn` |
-| `KRKN_REPO_PATH` | Path to your local krkn clone | `~/krkn` |
-| `NEO4J_URI` | Neo4j connection URI | `bolt://localhost:7687` |
-| `NEO4J_USER` | Neo4j username | `neo4j` |
-| `NEO4J_PASSWORD` | Neo4j password | — |
-| `OCP_RELEASE` | Target OpenShift release | `4.21` |
-
-> **Why is a local krkn clone required?**
-> The MAP phase calls `index_scenarios_from_repo()` which walks `$KRKN_REPO_PATH/scenarios/` on disk to build a catalog of existing chaos scenarios. This catalog is loaded into ChromaDB so the pipeline can determine whether a scenario already exists before flagging a coverage gap. Without the clone, scenario indexing returns empty and everything appears as a gap.
-
-### Run
+### Prerequisites
 
 Before running `./setup.sh`, you need:
 

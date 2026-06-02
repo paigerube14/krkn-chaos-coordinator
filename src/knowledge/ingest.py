@@ -601,6 +601,70 @@ def ingest_krkn_claude_md(github: GitHubClient, chroma: ChromaStore) -> int:
     return len(chunks)
 
 
+def ingest_agent_docs(github: GitHubClient, chroma: ChromaStore) -> int:
+    """Ingest domain-specific docs defined in agent YAML configs.
+
+    Reads the `docs` field from each config/agents/*.yaml and ingests
+    those GitHub paths into ChromaDB tagged with the agent's domain.
+    """
+    from src.agents.registry import discover_agents
+
+    total_chunks = 0
+    agents = discover_agents()
+
+    for agent_name, config in agents.items():
+        if not config.docs:
+            continue
+
+        logger.info("Ingesting docs for agent '%s' (%d sources)", agent_name, len(config.docs))
+
+        for doc_source in config.docs:
+            owner = doc_source["owner"]
+            repo = doc_source["repo"]
+            path = doc_source["path"]
+
+            files = _list_files_recursive(
+                github, owner, repo, path,
+                extensions=(".md", ".adoc", ".yaml", ".yml", ".rst"),
+            )
+            logger.info("  %s/%s/%s: %d files", owner, repo, path, len(files))
+
+            chunks = []
+            for f in files:
+                content = github.get_file_content(owner, repo, f["path"])
+                if not content:
+                    continue
+
+                if f["name"].endswith(".adoc"):
+                    cleaned = _clean_asciidoc(content)
+                elif f["name"].endswith((".md", ".rst")):
+                    cleaned = _clean_markdown(content)
+                else:
+                    cleaned = content
+
+                if len(cleaned) < 30:
+                    continue
+
+                text = f"Source: {owner}/{repo} — {f['path']}\n\n{cleaned}"
+
+                for chunk in _chunk_text(text):
+                    chunks.append(DocChunk(
+                        text=chunk,
+                        component=agent_name,
+                        doc_type="agent-docs",
+                        source=f"{owner}/{repo}",
+                        version="",
+                    ))
+
+            if chunks:
+                chroma.add_ocp_docs(chunks)
+                total_chunks += len(chunks)
+                logger.info("  Ingested %d chunks for %s", len(chunks), agent_name)
+
+    logger.info("Agent docs ingestion: %d total chunks", total_chunks)
+    return total_chunks
+
+
 def run_full_ingestion(github_token: str, chroma_dir: str = "./chroma_data") -> dict:
     """Run full ingestion pipeline — pull all docs from GitHub, ingest into ChromaDB."""
     github = GitHubClient(token=github_token)
@@ -621,6 +685,9 @@ def run_full_ingestion(github_token: str, chroma_dir: str = "./chroma_data") -> 
     # OpenShift docs
     results["ocp_modules"] = ingest_ocp_modules(github, chroma)
     results["ocp_topics"] = ingest_ocp_topics(github, chroma)
+
+    # Agent-specific docs (from config/agents/*.yaml docs field)
+    results["agent_docs"] = ingest_agent_docs(github, chroma)
 
     results["total"] = sum(results.values())
 

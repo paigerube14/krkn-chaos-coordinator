@@ -16,9 +16,13 @@ from src.coordinator.orchestrator import deduplicate_gaps, format_approval_queue
 from src.knowledge.chromadb_store import ChromaStore
 from src.knowledge.scenario_index import index_scenarios_from_repo
 
+LOG_FILE = "krkn-chaos-coordinator.log"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    filename=LOG_FILE,
+    filemode="w",
 )
 logger = logging.getLogger(__name__)
 

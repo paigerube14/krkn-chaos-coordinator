@@ -152,8 +152,8 @@ def main() -> None:
     parser.add_argument(
         "--memory-path",
         type=str,
-        default="./coordinator_memory.json",
-        help="Path to coordinator_memory.json",
+        default=None,
+        help="Path to coordinator_memory.json (omit to use Neo4j)",
     )
     parser.add_argument(
         "--seed",
@@ -168,10 +168,11 @@ def main() -> None:
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    logger.info("Sampling %d bugs from %s", args.sample_size, args.memory_path)
+    source = args.memory_path or "Neo4j"
+    logger.info("Sampling %d bugs from %s", args.sample_size, source)
     bugs = sample_bugs_for_eval(
-        memory_path=args.memory_path,
         sample_size=args.sample_size,
+        memory_path=args.memory_path,
         seed=args.seed,
     )
 

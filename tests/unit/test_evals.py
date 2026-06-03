@@ -231,8 +231,8 @@ class TestSampler:
         memory_path = tmp_path / "memory.json"
         memory_path.write_text(json.dumps(memory))
 
-        sample1 = sample_bugs_for_eval(str(memory_path), sample_size=10, seed=99)
-        sample2 = sample_bugs_for_eval(str(memory_path), sample_size=10, seed=99)
+        sample1 = sample_bugs_for_eval(memory_path=str(memory_path), sample_size=10, seed=99)
+        sample2 = sample_bugs_for_eval(memory_path=str(memory_path), sample_size=10, seed=99)
 
         keys1 = [b.key for b in sample1]
         keys2 = [b.key for b in sample2]
@@ -246,8 +246,8 @@ class TestSampler:
         memory_path = tmp_path / "memory.json"
         memory_path.write_text(json.dumps(memory))
 
-        sample1 = sample_bugs_for_eval(str(memory_path), sample_size=10, seed=1)
-        sample2 = sample_bugs_for_eval(str(memory_path), sample_size=10, seed=2)
+        sample1 = sample_bugs_for_eval(memory_path=str(memory_path), sample_size=10, seed=1)
+        sample2 = sample_bugs_for_eval(memory_path=str(memory_path), sample_size=10, seed=2)
 
         keys1 = [b.key for b in sample1]
         keys2 = [b.key for b in sample2]
@@ -258,7 +258,7 @@ class TestSampler:
         memory_path = tmp_path / "memory.json"
         memory_path.write_text(json.dumps({"analyzed_bugs": {}}))
 
-        bugs = sample_bugs_for_eval(str(memory_path), sample_size=0)
+        bugs = sample_bugs_for_eval(memory_path=str(memory_path), sample_size=0)
         assert bugs == []
 
     def test_sampler_raises_on_oversized_sample(self, tmp_path):
@@ -268,7 +268,7 @@ class TestSampler:
         memory_path.write_text(json.dumps(memory))
 
         with pytest.raises(ValueError, match="exceeds available"):
-            sample_bugs_for_eval(str(memory_path), sample_size=10)
+            sample_bugs_for_eval(memory_path=str(memory_path), sample_size=10)
 
     def test_sampler_creates_valid_bug_objects(self, tmp_path):
         """Verify Bug objects have correct fields from memory JSON."""
@@ -276,7 +276,7 @@ class TestSampler:
         memory_path = tmp_path / "memory.json"
         memory_path.write_text(json.dumps(memory))
 
-        bugs = sample_bugs_for_eval(str(memory_path), sample_size=1)
+        bugs = sample_bugs_for_eval(memory_path=str(memory_path), sample_size=1)
 
         assert len(bugs) == 1
         bug = bugs[0]

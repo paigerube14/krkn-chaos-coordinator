@@ -72,16 +72,17 @@ class JiraClient:
         When priority_filter is True, fetches Critical/Major/Blocker bugs first,
         then backfills with remaining bugs up to max_results.
 
-        Three-tier version query when release is set (e.g. "4.21"):
-          Tier 1: affectedVersion in the target release range (>= 4.21, < 4.22)
-          Tier 2: older versions that are still open (unfixed, likely still present)
-          Tier 3: no affectedVersion set
+        4-tier version query when release is set (e.g. "4.21"):
+          Tier 1: bugs tagged with target release (>= 4.21, < 4.22)
+          Tier 2: open bugs from older versions (unfixed, likely still present)
+          Tier 3: open bugs from newer versions (if reported on 5.0, likely affects 4.21)
+          Tier 4: bugs with no affectedVersion set
         """
         component_list = ", ".join(f'"{c}"' for c in components)
 
         if release:
             next_minor = _next_version(release)
-            bugs = self._three_tier_version_query(
+            bugs = self._four_tier_version_query(
                 component_list, release, next_minor, days, max_results, priority_filter,
             )
             return bugs
@@ -95,7 +96,7 @@ class JiraClient:
 
         return self._priority_then_backfill(component_list, "", days, max_results)
 
-    def _three_tier_version_query(
+    def _four_tier_version_query(
         self,
         component_list: str,
         release: str,

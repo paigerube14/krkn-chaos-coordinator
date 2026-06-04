@@ -165,6 +165,8 @@ def main():
             for agent_name in agent_names:
                 all_results.append(_run_agent(agent_name, release))
 
+    neo4j_store.close()
+
     # Orchestrator: deduplicate and format
     gaps = deduplicate_gaps(all_results)
 

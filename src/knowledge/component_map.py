@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from pathlib import Path
 
 from src.agents.registry import discover_agents
@@ -16,17 +17,19 @@ from src.agents.registry import discover_agents
 logger = logging.getLogger(__name__)
 
 _registry_cache: dict[str, list[str]] | None = None
+_registry_lock = threading.Lock()
 
 
 def _load_registry() -> dict[str, list[str]]:
     """Load agent → components mapping from YAML registry, cached."""
     global _registry_cache
-    if _registry_cache is None:
-        agents = discover_agents()
-        _registry_cache = {
-            name: list(config.components)
-            for name, config in agents.items()
-        }
+    with _registry_lock:
+        if _registry_cache is None:
+            agents = discover_agents()
+            _registry_cache = {
+                name: list(config.components)
+                for name, config in agents.items()
+            }
     return _registry_cache
 
 
